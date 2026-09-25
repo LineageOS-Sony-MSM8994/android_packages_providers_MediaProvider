@@ -69,6 +69,7 @@ class LocalUriMatcher {
 
     static final int FILES = 700;
     static final int FILES_ID = 701;
+    static final int EXTENDED_FILE = 702;
 
     static final int DOWNLOADS = 800;
     static final int DOWNLOADS_ID = 801;
@@ -214,6 +215,13 @@ class LocalUriMatcher {
 
         mPublic.addURI(auth, "*/file", FILES);
         mPublic.addURI(auth, "*/file/#", FILES_ID);
+        // The Sony camera apps address the standard collections through paths of their own.
+        mPublic.addURI(auth, "*/extended_file", EXTENDED_FILE);
+        mPublic.addURI(auth, "*/extended_file/#", FILES_ID);
+        mPublic.addURI(auth, "*/extended_images/media", IMAGES_MEDIA);
+        mPublic.addURI(auth, "*/extended_images/media/#", IMAGES_MEDIA_ID);
+        mPublic.addURI(auth, "*/extended_video/media", VIDEO_MEDIA);
+        mPublic.addURI(auth, "*/extended_video/media/#", VIDEO_MEDIA_ID);
 
         mPublic.addURI(auth, "*/downloads", DOWNLOADS);
         mPublic.addURI(auth, "*/downloads/#", DOWNLOADS_ID);
