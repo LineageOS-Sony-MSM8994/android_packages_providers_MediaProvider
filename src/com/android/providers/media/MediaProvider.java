@@ -115,6 +115,7 @@ import static com.android.providers.media.LocalUriMatcher.AUDIO_PLAYLISTS_ID_MEM
 import static com.android.providers.media.LocalUriMatcher.CLI;
 import static com.android.providers.media.LocalUriMatcher.DOWNLOADS;
 import static com.android.providers.media.LocalUriMatcher.DOWNLOADS_ID;
+import static com.android.providers.media.LocalUriMatcher.EXTENDED_FILE;
 import static com.android.providers.media.LocalUriMatcher.FILES;
 import static com.android.providers.media.LocalUriMatcher.FILES_ID;
 import static com.android.providers.media.LocalUriMatcher.FS_ID;
@@ -5881,6 +5882,9 @@ public class MediaProvider extends ContentProvider {
             // IDs are forever; nobody should be editing them
             initialValues.remove(MediaColumns._ID);
 
+            // Sony camera apps tag their writes with vendor columns of their own.
+            stripSonyValues(initialValues);
+
             // Expiration times are hard-coded; let's derive them
             FileUtils.computeDateExpires(initialValues);
 
@@ -6276,6 +6280,63 @@ public class MediaProvider extends ContentProvider {
         }
     }
 
+    private static final String SOMC_FILE_TYPE = "somctype";
+    private static final String SOMC_FILE_LINK_PATH = "filelinkpath";
+    private static final String SOMC_FOLDER_CATEGORY = "somccategory";
+    private static final String SOMC_FILES_ID = "files_id";
+
+    // The strict query builder rejects a write carrying a column it does not know about.
+    private static final String[] SONY_WRITTEN_COLUMNS = {
+            SOMC_FILE_TYPE, SOMC_FILE_LINK_PATH, SOMC_FOLDER_CATEGORY, SOMC_FILES_ID };
+
+    // Read back as NULL, like the stock provider does when nothing ever filled them in.
+    private static final String[] SONY_EMPTY_COLUMNS = {
+            "somchash", "userrating", "title_yomi", "audiosamplerate", "audionumchannels",
+            "audiosampledepth", "audiowavecodec", "audiobitrate", "videoscantype",
+            "videofourcccodec", "videobitrate", "videoframesperthousandseconds",
+            "videoencodingprofile" };
+
+    private static final String[] SONY_EXTENDED_COLUMNS;
+    static {
+        final List<String> columns = new ArrayList<>();
+        columns.add(SOMC_FILE_TYPE);
+        columns.add(SOMC_FILE_LINK_PATH);
+        columns.add(SOMC_FOLDER_CATEGORY);
+        columns.add(SOMC_FILES_ID);
+        columns.addAll(Arrays.asList(SONY_EMPTY_COLUMNS));
+        SONY_EXTENDED_COLUMNS = columns.toArray(new String[0]);
+    }
+
+    // Sony camera apps address the standard collections through their stock extended_* paths.
+    private static boolean isSonyExtendedCollection(@NonNull Uri uri) {
+        final List<String> segments = uri.getPathSegments();
+        return segments.size() >= 2 && segments.get(1).startsWith("extended_");
+    }
+
+    // We answer with the stock defaults and store nothing, so just drop the columns.
+    private static void stripSonyValues(@Nullable ContentValues values) {
+        if (values == null) {
+            return;
+        }
+        for (String column : SONY_WRITTEN_COLUMNS) {
+            values.remove(column);
+        }
+    }
+
+    // Wrap the table so the Sony vendor columns read back with the stock defaults.
+    private static String withSonyColumns(@NonNull String tables) {
+        final StringBuilder sql = new StringBuilder("(SELECT *,");
+        sql.append(" 0 AS ").append(SOMC_FILE_TYPE).append(',');
+        sql.append(" NULL AS ").append(SOMC_FILE_LINK_PATH).append(',');
+        sql.append(" 0 AS ").append(SOMC_FOLDER_CATEGORY).append(',');
+        sql.append(" _id AS ").append(SOMC_FILES_ID);
+        for (String column : SONY_EMPTY_COLUMNS) {
+            sql.append(", NULL AS ").append(column);
+        }
+        sql.append(" FROM ").append(tables).append(") AS ").append(tables);
+        return sql.toString();
+    }
+
     private @NonNull SQLiteQueryBuilder getQueryBuilderInternal(int type, int match,
             @NonNull Uri uri, @NonNull Bundle extras, @Nullable Consumer<String> honored,
             Optional<List<String>> includedDefaultDirectoriesOptional) {
@@ -6294,6 +6355,15 @@ public class MediaProvider extends ContentProvider {
                 throw new UnsupportedOperationException(
                         "Writes on: " + redactedUri.toString() + " are not supported");
             }
+        }
+
+        final boolean extendedFile = match == EXTENDED_FILE;
+        if (extendedFile) {
+            if (forWrite) {
+                throw new UnsupportedOperationException(
+                        "Writes on: " + uri.toString() + " are not supported");
+            }
+            match = FILES;
         }
 
         final SQLiteQueryBuilder qb = new SQLiteQueryBuilder();
@@ -6699,6 +6769,25 @@ public class MediaProvider extends ContentProvider {
             default:
                 throw new UnsupportedOperationException(
                         "Unknown or unsupported URL: " + uri.toString());
+        }
+
+        // Sony camera apps read the extended_file view of their stock MediaProvider.
+        if (extendedFile) {
+            qb.setTables(withSonyColumns("files"));
+            final ArrayMap<String, String> projectionMap = new ArrayMap<>(
+                    getProjectionMap(Files.FileColumns.class));
+            for (String column : SONY_EXTENDED_COLUMNS) {
+                projectionMap.put(column, column);
+            }
+            qb.setProjectionMap(projectionMap);
+        } else if (type == TYPE_QUERY && isSonyExtendedCollection(uri)) {
+            final ArrayMap<String, String> projectionMap = new ArrayMap<>();
+            projectionMap.putAll(qb.getProjectionMap());
+            for (String column : SONY_EXTENDED_COLUMNS) {
+                projectionMap.put(column, column);
+            }
+            qb.setTables(withSonyColumns(qb.getTables()));
+            qb.setProjectionMap(projectionMap);
         }
 
         // To ensure we're enforcing our security model, all operations must
@@ -9208,6 +9297,9 @@ public class MediaProvider extends ContentProvider {
         if (initialValues != null) {
             // IDs are forever; nobody should be editing them
             initialValues.remove(MediaColumns._ID);
+
+            // Sony camera apps tag their writes with vendor columns of their own.
+            stripSonyValues(initialValues);
 
             // Expiration times are hard-coded; let's derive them
             FileUtils.computeDateExpires(initialValues);
