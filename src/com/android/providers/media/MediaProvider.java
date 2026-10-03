@@ -5865,6 +5865,7 @@ public class MediaProvider extends ContentProvider {
     @Nullable
     private Uri insertInternal(@NonNull Uri uri, @Nullable ContentValues initialValues,
             @Nullable Bundle extras) throws FallbackException {
+        uri = replaceExternalUriWithDataVolume(uri, initialValues);
         final String originalVolumeName = getVolumeName(uri);
         PulledMetrics.logVolumeAccessViaMediaProvider(getCallingUidOrSelf(), originalVolumeName);
 
@@ -9254,6 +9255,7 @@ public class MediaProvider extends ContentProvider {
 
     private int updateInternal(@NonNull Uri uri, @Nullable ContentValues initialValues,
             @Nullable Bundle extras) throws FallbackException {
+        uri = replaceExternalUriWithDataVolume(uri, initialValues);
         final String volumeName = getVolumeName(uri);
         PulledMetrics.logVolumeAccessViaMediaProvider(getCallingUidOrSelf(), volumeName);
 
@@ -13182,6 +13184,20 @@ public class MediaProvider extends ContentProvider {
                 mCachedCallingIdentityForFuse.valueAt(i).dump(writer);
             }
         }
+    }
+
+    private Uri replaceExternalUriWithDataVolume(Uri uri, @Nullable ContentValues values) {
+        if (values == null || !MediaStore.VOLUME_EXTERNAL.equals(getVolumeName(uri))) return uri;
+        if (!isCallingPackageSelf() && !isCallingPackageLegacyWrite()
+                && !isCallingPackageManager()) {
+            return uri;
+        }
+        final String dataVolume = extractVolumeName(values.getAsString(MediaColumns.DATA));
+        if (dataVolume == null || MediaStore.VOLUME_INTERNAL.equals(dataVolume)
+                || MediaStore.VOLUME_EXTERNAL_PRIMARY.equals(dataVolume)) {
+            return uri;
+        }
+        return replaceExternalUriWithVolumeName(uri, dataVolume);
     }
 
     /**
